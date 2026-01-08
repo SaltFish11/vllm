@@ -1222,6 +1222,16 @@ class OpenAIServingResponses(OpenAIServing):
         current_content_index = 0
         current_output_index = 0
         current_item_id = ""
+        tool_call_mode = False
+        tool_call_sent = False
+        tool_call_buffer: list[str] = []
+
+        def _emit_argument_chunks(arguments: str, chunk_size: int = 32):
+            if not arguments:
+                return
+            for start in range(0, len(arguments), chunk_size):
+                yield arguments[start : start + chunk_size]
+
         reasoning_parser = None
         if self.reasoning_parser:
             reasoning_parser = self.reasoning_parser(tokenizer)
@@ -1237,6 +1247,101 @@ class OpenAIServingResponses(OpenAIServing):
                 output = ctx.last_output.outputs[0]
                 # finish_reason='error' indicates a retryable error
                 self._raise_if_error(output.finish_reason, request.request_id)
+                delta_text = output.text or ""
+                combined_buffer = "".join(tool_call_buffer) + delta_text
+                if (
+                    not tool_call_mode
+                    and not tool_call_sent
+                    and combined_buffer.lstrip().startswith("<tool_call>")
+                ):
+                    tool_call_mode = True
+                    first_delta_sent = True
+
+                if tool_call_mode and not tool_call_sent:
+                    tool_call_buffer.append(delta_text)
+                    previous_text += delta_text
+                    previous_token_ids += output.token_ids
+                    buffered_text = "".join(tool_call_buffer)
+                    if "</tool_call>" in buffered_text:
+                        tool_call_mode = False
+                        try:
+                            tool_calls, _ = self._parse_tool_calls_from_content(
+                                request=request,
+                                tokenizer=tokenizer,
+                                content=buffered_text,
+                                enable_auto_tools=self.enable_auto_tools,
+                                tool_parser_cls=self.tool_parser,
+                            )
+                        except Exception:
+                            tool_calls = None
+                        if tool_calls:
+                            for call in tool_calls:
+                                item_id = f"fc_{random_uuid()}"
+                                call_id = f"call_{random_uuid()}"
+                                name = call.name or ""
+                                arguments = call.arguments or ""
+                                yield _increment_sequence_number_and_return(
+                                    ResponseOutputItemAddedEvent(
+                                        type="response.output_item.added",
+                                        sequence_number=-1,
+                                        output_index=current_output_index,
+                                        item=ResponseFunctionToolCall(
+                                            id=item_id,
+                                            type="function_call",
+                                            status="in_progress",
+                                            name=name,
+                                            call_id=call_id,
+                                            arguments="",
+                                        ),
+                                    )
+                                )
+                                for chunk in _emit_argument_chunks(arguments):
+                                    yield _increment_sequence_number_and_return(
+                                        ResponseFunctionCallArgumentsDeltaEvent(
+                                            type="response.function_call_arguments.delta",
+                                            sequence_number=-1,
+                                            output_index=current_output_index,
+                                            item_id=item_id,
+                                            delta=chunk,
+                                        )
+                                    )
+                                yield _increment_sequence_number_and_return(
+                                    ResponseFunctionCallArgumentsDoneEvent(
+                                        type="response.function_call_arguments.done",
+                                        sequence_number=-1,
+                                        output_index=current_output_index,
+                                        item_id=item_id,
+                                        arguments=arguments,
+                                        name=name,
+                                    )
+                                )
+                                yield _increment_sequence_number_and_return(
+                                    ResponseOutputItemDoneEvent(
+                                        type="response.output_item.done",
+                                        sequence_number=-1,
+                                        output_index=current_output_index,
+                                        item=ResponseFunctionToolCall(
+                                            id=item_id,
+                                            type="function_call",
+                                            status="completed",
+                                            name=name,
+                                            call_id=call_id,
+                                            arguments=arguments,
+                                        ),
+                                    )
+                                )
+                                current_output_index += 1
+                            tool_call_sent = True
+                            first_delta_sent = False
+                        else:
+                            logger.warning(
+                                "Failed to parse tool call content during streaming; falling back to text output."
+                            )
+                            tool_call_sent = True
+                            first_delta_sent = False
+                        tool_call_buffer.clear()
+                    continue
+
                 if reasoning_parser:
                     delta_message = reasoning_parser.extract_reasoning_streaming(
                         previous_text=previous_text,
@@ -1302,7 +1407,7 @@ class OpenAIServingResponses(OpenAIServing):
                     )
                     current_content_index += 1
                     first_delta_sent = True
-                # todo(kebe7jun) tool call support
+                # tool call support handled earlier when streaming starts with <tool_call>
 
                 # check delta message and previous delta message are
                 # same as content or reasoning content
