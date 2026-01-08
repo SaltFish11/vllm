@@ -457,6 +457,38 @@ class ResponsesRequest(OpenAIBaseModel):
             and "message.output_text.logprobs" in self.include
         )
 
+    # Allow clients to omit certain required fields for assistant output
+    # messages by auto-filling sane defaults before formal parsing.
+    @field_serializer("input", when_used="always")
+    def _noop_input_serializer(self, v):
+        # Keep default serialization behavior; this method exists only to
+        # ensure field_validator runs as intended across versions.
+        return v
+
+    @model_validator(mode="before")
+    def _coerce_output_message_defaults(cls, data):
+        try:
+            inp = data.get("input")
+            if isinstance(inp, list):
+                for item in inp:
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type") == "message"
+                        and item.get("role") == "assistant"
+                    ):
+                        item.setdefault("status", "completed")
+                        content = item.get("content")
+                        if isinstance(content, list):
+                            for part in content:
+                                if (
+                                    isinstance(part, dict)
+                                    and part.get("type") == "output_text"
+                                ):
+                                    part.setdefault("annotations", [])
+        except Exception:
+            return data
+        return data
+
     @model_validator(mode="before")
     def validate_background(cls, data):
         if not data.get("background"):
