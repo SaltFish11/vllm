@@ -174,6 +174,9 @@ class OpenAIServingChat(OpenAIServing):
         for the API specification. This API mimics the OpenAI
         Chat Completion API.
         """
+        print("request:", request)
+        print("raw_request:", raw_request)
+        
         error_check_ret = await self._check_model(request)
         if error_check_ret is not None:
             logger.error("Error with model %s", error_check_ret)
@@ -258,6 +261,11 @@ class OpenAIServingChat(OpenAIServing):
         request_id = (
             f"chatcmpl-{self._base_request_id(raw_request, request.request_id)}"
         )
+
+        if self.request_logger is not None:
+            self.request_logger.log_request(request_id,
+                                            request,
+                                            request_type="chat")
 
         request_metadata = RequestResponseMetadata(request_id=request_id)
         if raw_request:

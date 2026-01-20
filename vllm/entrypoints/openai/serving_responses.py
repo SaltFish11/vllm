@@ -375,6 +375,11 @@ class OpenAIServingResponses(OpenAIServing):
         if raw_request:
             raw_request.state.request_metadata = request_metadata
 
+        if self.request_logger is not None:
+            self.request_logger.log_request(request.request_id,
+                                            request,
+                                            request_type="responses")
+
         # Schedule the request and get the result generator.
         generators: list[AsyncGenerator[ConversationContext, None]] = []
 

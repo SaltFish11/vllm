@@ -2,6 +2,8 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 
 from collections.abc import Sequence
+import json
+from typing import Any, Optional, Union
 
 import torch
 
@@ -82,3 +84,28 @@ class RequestLogger:
             output_token_ids,
             finish_reason,
         )
+
+    def log_request(self,
+                    request_id: str,
+                    request: Any,
+                    request_type: Optional[str] = None) -> None:
+        payload: Any
+        if hasattr(request, "model_dump"):
+            payload = request.model_dump(exclude_none=True)
+        else:
+            payload = request
+
+        try:
+            payload_str = json.dumps(payload, ensure_ascii=False, default=str)
+        except TypeError:
+            payload_str = str(payload)
+
+        max_log_len = self.max_log_len
+        if max_log_len is not None and len(payload_str) > max_log_len:
+            payload_str = payload_str[:max_log_len] + "...<truncated>"
+
+        if request_type:
+            logger.info("Received %s request %s: %s", request_type, request_id,
+                        payload_str)
+        else:
+            logger.info("Received request %s: %s", request_id, payload_str)
