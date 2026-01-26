@@ -1331,7 +1331,7 @@ class OpenAIServingResponses(OpenAIServing):
                 delta_message: DeltaMessage | None = None
                 delta_message = DeltaMessage(content=output.text)
                 if reasoning_parser:
-                    delta_message = reasoning_parser.extract_reasoning_streaming(
+                    reasoning_delta = reasoning_parser.extract_reasoning_streaming(
                         previous_text=previous_text,
                         current_text=previous_text + output.text,
                         delta_text=output.text,
@@ -1339,8 +1339,10 @@ class OpenAIServingResponses(OpenAIServing):
                         current_token_ids=previous_token_ids + output.token_ids,
                         delta_token_ids=output.token_ids,
                     )
+                    if reasoning_delta is not None:
+                        delta_message = reasoning_delta
                 if tool_parser:
-                    delta_message = tool_parser.extract_tool_calls_streaming(
+                    tool_delta = tool_parser.extract_tool_calls_streaming(
                         previous_text=previous_text,
                         current_text=previous_text + output.text,
                         delta_text=output.text,
@@ -1349,9 +1351,13 @@ class OpenAIServingResponses(OpenAIServing):
                         delta_token_ids=output.token_ids,
                         request=request,  # type: ignore
                     )
-                    if delta_message.tool_calls:
-                        assert delta_message.tool_calls[0].function is not None
-                        assert delta_message.tool_calls[0].function.name is not None
+                    if tool_delta is not None:
+                        delta_message = tool_delta
+                        if delta_message.tool_calls:
+                            assert delta_message.tool_calls[0].function is not None
+                            assert (
+                                delta_message.tool_calls[0].function.name is not None
+                            )
                 previous_text += output.text
                 previous_token_ids += output.token_ids
                 if delta_message is None:
