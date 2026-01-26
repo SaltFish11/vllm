@@ -1353,11 +1353,15 @@ class OpenAIServingResponses(OpenAIServing):
                     )
                     if tool_delta is not None:
                         delta_message = tool_delta
-                        if delta_message.tool_calls:
-                            assert delta_message.tool_calls[0].function is not None
-                            assert (
-                                delta_message.tool_calls[0].function.name is not None
-                            )
+                        if (
+                            delta_message.tool_calls
+                            and delta_message.tool_calls[0].function is not None
+                            and delta_message.tool_calls[0].function.name is not None
+                        ):
+                            pass
+                        elif delta_message.tool_calls:
+                            # Skip malformed tool call deltas without function/name.
+                            delta_message.tool_calls = []
                 previous_text += output.text
                 previous_token_ids += output.token_ids
                 if delta_message is None:
