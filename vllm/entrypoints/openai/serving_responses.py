@@ -1322,6 +1322,7 @@ class OpenAIServingResponses(OpenAIServing):
         previous_delta_messages: list[DeltaMessage] = []
         async for ctx in result_generator:
             assert isinstance(ctx, SimpleContext)
+            print("ctx.last_output:", ctx.last_output)
             if ctx.last_output is None:
                 continue
             if ctx.last_output.outputs:
@@ -1330,6 +1331,7 @@ class OpenAIServingResponses(OpenAIServing):
                 self._raise_if_error(output.finish_reason, request.request_id)
                 delta_message: DeltaMessage | None = None
                 delta_message = DeltaMessage(content=output.text)
+                print("delta_message:", delta_message)
                 if reasoning_parser:
                     reasoning_delta = reasoning_parser.extract_reasoning_streaming(
                         previous_text=previous_text,
@@ -1351,6 +1353,7 @@ class OpenAIServingResponses(OpenAIServing):
                         delta_token_ids=output.token_ids,
                         request=request,  # type: ignore
                     )
+                    print("tool_delta:", tool_delta)
                     if tool_delta is not None:
                         delta_message = tool_delta
                         if (
@@ -1362,13 +1365,16 @@ class OpenAIServingResponses(OpenAIServing):
                         elif delta_message.tool_calls:
                             # Skip malformed tool call deltas without function/name.
                             delta_message.tool_calls = []
+                print("after tool_parser delta_message:", delta_message)
                 previous_text += output.text
                 previous_token_ids += output.token_ids
                 if delta_message is None:
                     continue
                 if not first_delta_sent:
+                    print("not first_delta_sent")
                     current_item_id = random_uuid()
                     if delta_message.tool_calls:
+                        print("if tool_calls")
                         current_tool_call_id = f"call_{random_uuid()}"
                         current_tool_call_name = delta_message.tool_calls[
                             0
@@ -1391,6 +1397,7 @@ class OpenAIServingResponses(OpenAIServing):
                             )
                         )
                     elif delta_message.reasoning:
+                        print("elif reasoning")
                         yield _increment_sequence_number_and_return(
                             ResponseOutputItemAddedEvent(
                                 type="response.output_item.added",
@@ -1405,6 +1412,7 @@ class OpenAIServingResponses(OpenAIServing):
                             )
                         )
                     else:
+                        print("else")
                         yield _increment_sequence_number_and_return(
                             ResponseOutputItemAddedEvent(
                                 type="response.output_item.added",
@@ -1457,6 +1465,7 @@ class OpenAIServingResponses(OpenAIServing):
                         for pm in previous_delta_messages
                         if pm.tool_calls
                     )
+                    print("tool_call_arguments:", tool_call_arguments)
                     yield _increment_sequence_number_and_return(
                         ResponseFunctionCallArgumentsDoneEvent(
                             type="response.function_call_arguments.done",
