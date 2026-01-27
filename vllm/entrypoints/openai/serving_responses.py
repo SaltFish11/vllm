@@ -1322,7 +1322,7 @@ class OpenAIServingResponses(OpenAIServing):
         previous_delta_messages: list[DeltaMessage] = []
         async for ctx in result_generator:
             assert isinstance(ctx, SimpleContext)
-            print("ctx.last_output:", ctx.last_output)
+            print("ctx.last_output.outputs:", ctx.last_output.outputs)
             if ctx.last_output is None:
                 continue
             if ctx.last_output.outputs:
@@ -1361,8 +1361,10 @@ class OpenAIServingResponses(OpenAIServing):
                             and delta_message.tool_calls[0].function is not None
                             and delta_message.tool_calls[0].function.name is not None
                         ):
+                            print("222")
                             pass
                         elif delta_message.tool_calls:
+                            print("333")
                             # Skip malformed tool call deltas without function/name.
                             delta_message.tool_calls = []
                 print("after tool_parser delta_message:", delta_message)
@@ -1428,6 +1430,7 @@ class OpenAIServingResponses(OpenAIServing):
                             )
                         )
                     # skip content_part for tool calls
+                    print("not delta_message.tool_calls:",(not delta_message.tool_calls))
                     if not delta_message.tool_calls:
                         yield _increment_sequence_number_and_return(
                             ResponseContentPartAddedEvent(
