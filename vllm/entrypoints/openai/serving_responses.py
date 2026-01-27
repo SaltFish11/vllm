@@ -1359,14 +1359,21 @@ class OpenAIServingResponses(OpenAIServing):
                         if (
                             delta_message.tool_calls
                             and delta_message.tool_calls[0].function is not None
-                            and delta_message.tool_calls[0].function.name is not None
                         ):
-                            print("222")
-                            pass
-                        elif delta_message.tool_calls:
-                            print("333")
-                            # Skip malformed tool call deltas without function/name.
-                            delta_message.tool_calls = []
+                            function = delta_message.tool_calls[0].function
+                            has_name = function.name is not None
+                            has_args = bool(function.arguments)
+                            in_tool_call = bool(
+                                previous_delta_messages
+                                and previous_delta_messages[-1].tool_calls
+                            )
+                            if has_name or (has_args and in_tool_call):
+                                print("222")
+                                pass
+                            else:
+                                print("333")
+                                # Skip malformed tool call deltas without function/name.
+                                delta_message.tool_calls = []
                 print("after tool_parser delta_message:", delta_message)
                 previous_text += output.text
                 previous_token_ids += output.token_ids
@@ -1651,6 +1658,7 @@ class OpenAIServingResponses(OpenAIServing):
                     previous_delta_messages = []
                 if delta_message.tool_calls and delta_message.tool_calls[0].function:
                     if delta_message.tool_calls[0].function.arguments:
+                        print("delta_message.tool_calls[0].function.arguments:", delta_message.tool_calls[0].function.arguments)
                         yield _increment_sequence_number_and_return(
                             ResponseFunctionCallArgumentsDeltaEvent(
                                 type="response.function_call_arguments.delta",
@@ -1662,6 +1670,7 @@ class OpenAIServingResponses(OpenAIServing):
                         )
                     # tool call initiated with no arguments
                     elif delta_message.tool_calls[0].function.name:
+                        print("delta_message.tool_calls[0].function.name:", delta_message.tool_calls[0].function.name)
                         # send done with current content part
                         # and add new function call item
                         yield _increment_sequence_number_and_return(
@@ -1741,6 +1750,7 @@ class OpenAIServingResponses(OpenAIServing):
                         )
                     )
                 elif delta_message.content:
+                    print("delta_message.content:", delta_message.content)
                     yield _increment_sequence_number_and_return(
                         ResponseTextDeltaEvent(
                             type="response.output_text.delta",
