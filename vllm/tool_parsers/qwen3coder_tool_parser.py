@@ -139,6 +139,16 @@ class Qwen3CoderToolParser(ToolParser):
         if param_value.lower() == "null":
             return None
 
+        if func_name in {"shell", "shell_command"} and param_name == "command":
+            with contextlib.suppress(json.JSONDecodeError, TypeError, ValueError):
+                parsed = json.loads(param_value)
+                if isinstance(parsed, list):
+                    return parsed
+            with contextlib.suppress(ValueError, SyntaxError, TypeError):
+                parsed = ast.literal_eval(param_value)
+                if isinstance(parsed, list):
+                    return parsed
+
         if param_name not in param_config:
             if param_config != {}:
                 logger.debug(
