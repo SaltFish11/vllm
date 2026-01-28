@@ -1331,6 +1331,7 @@ class OpenAIServingResponses(OpenAIServing):
                 self._raise_if_error(output.finish_reason, request.request_id)
                 delta_message: DeltaMessage | None = None
                 delta_message = DeltaMessage(content=output.text)
+                print("="*20)
                 print("delta_message:", delta_message)
                 if reasoning_parser:
                     reasoning_delta = reasoning_parser.extract_reasoning_streaming(
@@ -1367,13 +1368,20 @@ class OpenAIServingResponses(OpenAIServing):
                                 previous_delta_messages
                                 and previous_delta_messages[-1].tool_calls
                             )
-                            if has_name or (has_args and in_tool_call):
+                            tool_call_in_progress = bool(current_tool_call_name)
+                            if has_name or (
+                                has_args and (in_tool_call or tool_call_in_progress)
+                            ):
                                 print("222")
                                 pass
                             else:
                                 print("333")
                                 # Skip malformed tool call deltas without function/name.
                                 delta_message.tool_calls = []
+                    elif getattr(tool_parser, "is_tool_call_started", False):
+                        # Suppress raw tool-call tag fragments from being
+                        # streamed as output text.
+                        delta_message = None
                 print("after tool_parser delta_message:", delta_message)
                 previous_text += output.text
                 previous_token_ids += output.token_ids
