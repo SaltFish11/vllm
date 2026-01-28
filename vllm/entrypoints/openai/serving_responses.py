@@ -2840,6 +2840,22 @@ class OpenAIServingResponses(OpenAIServing):
                 request_metadata,
                 created_time=created_time,
             )
+            function_call_outputs = [
+                item
+                for item in getattr(final_response, "output", [])
+                if isinstance(item, ResponseFunctionToolCall)
+            ]
+            if function_call_outputs:
+                base_output_index = len(getattr(final_response, "output", []))
+                for offset, tool_call in enumerate(function_call_outputs):
+                    yield _increment_sequence_number_and_return(
+                        ResponseOutputItemDoneEvent(
+                            type="response.output_item.done",
+                            sequence_number=-1,
+                            output_index=base_output_index + offset,
+                            item=tool_call,
+                        )
+                    )
             yield _increment_sequence_number_and_return(
                 ResponseCompletedEvent(
                     type="response.completed",
