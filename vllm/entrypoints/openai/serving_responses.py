@@ -1310,6 +1310,7 @@ class OpenAIServingResponses(OpenAIServing):
         current_item_id = ""
         current_tool_call_id = ""
         current_tool_call_name = ""
+        current_item_kind = ""
         tool_parser = None
         if self.tool_parser:
             tool_parser = self.tool_parser(tokenizer)
@@ -1382,6 +1383,17 @@ class OpenAIServingResponses(OpenAIServing):
                         # Suppress raw tool-call tag fragments from being
                         # streamed as output text.
                         delta_message = None
+                    else:
+                        suppress_tokens = (
+                            getattr(tool_parser, "tool_call_start_token", None),
+                            getattr(tool_parser, "tool_call_end_token", None),
+                            getattr(tool_parser, "tool_call_prefix", None),
+                            getattr(tool_parser, "parameter_prefix", None),
+                            getattr(tool_parser, "parameter_end_token", None),
+                            getattr(tool_parser, "function_end_token", None),
+                        )
+                        if any(token and token in output.text for token in suppress_tokens):
+                            delta_message = None
                 print("after tool_parser delta_message:", delta_message)
                 previous_text += output.text
                 previous_token_ids += output.token_ids
@@ -1396,6 +1408,7 @@ class OpenAIServingResponses(OpenAIServing):
                         current_tool_call_name = delta_message.tool_calls[
                             0
                         ].function.name
+                        current_item_kind = "tool_call"
                         yield _increment_sequence_number_and_return(
                             ResponseOutputItemAddedEvent(
                                 type="response.output_item.added",
@@ -1415,6 +1428,7 @@ class OpenAIServingResponses(OpenAIServing):
                         )
                     elif delta_message.reasoning:
                         print("elif reasoning")
+                        current_item_kind = "reasoning"
                         yield _increment_sequence_number_and_return(
                             ResponseOutputItemAddedEvent(
                                 type="response.output_item.added",
@@ -1430,6 +1444,7 @@ class OpenAIServingResponses(OpenAIServing):
                         )
                     else:
                         print("else")
+                        current_item_kind = "message"
                         yield _increment_sequence_number_and_return(
                             ResponseOutputItemAddedEvent(
                                 type="response.output_item.added",
@@ -1519,6 +1534,7 @@ class OpenAIServingResponses(OpenAIServing):
                             0
                         ].function.name
                         current_tool_call_id = f"call_{random_uuid()}"
+                        current_item_kind = "tool_call"
                         yield _increment_sequence_number_and_return(
                             ResponseOutputItemAddedEvent(
                                 type="response.output_item.added",
@@ -1538,6 +1554,7 @@ class OpenAIServingResponses(OpenAIServing):
                         )
                     elif delta_message.content:
                         # back to normal message output
+                        current_item_kind = "message"
                         yield _increment_sequence_number_and_return(
                             ResponseOutputItemAddedEvent(
                                 type="response.output_item.added",
@@ -1679,73 +1696,75 @@ class OpenAIServingResponses(OpenAIServing):
                     # tool call initiated with no arguments
                     elif delta_message.tool_calls[0].function.name:
                         print("delta_message.tool_calls[0].function.name:", delta_message.tool_calls[0].function.name)
-                        # send done with current content part
-                        # and add new function call item
-                        yield _increment_sequence_number_and_return(
-                            ResponseTextDoneEvent(
-                                type="response.output_text.done",
-                                sequence_number=-1,
-                                output_index=current_output_index,
-                                content_index=current_content_index,
-                                text="",
-                                logprobs=[],
-                                item_id=current_item_id,
-                            )
-                        )
-                        yield _increment_sequence_number_and_return(
-                            ResponseContentPartDoneEvent(
-                                type="response.content_part.done",
-                                sequence_number=-1,
-                                item_id=current_item_id,
-                                output_index=current_output_index,
-                                content_index=current_content_index,
-                                part=ResponseOutputText(
-                                    type="output_text",
+                        if current_item_kind == "message":
+                            # send done with current content part
+                            # and add new function call item
+                            yield _increment_sequence_number_and_return(
+                                ResponseTextDoneEvent(
+                                    type="response.output_text.done",
+                                    sequence_number=-1,
+                                    output_index=current_output_index,
+                                    content_index=current_content_index,
                                     text="",
-                                    annotations=[],
                                     logprobs=[],
-                                ),
+                                    item_id=current_item_id,
+                                )
                             )
-                        )
-                        yield _increment_sequence_number_and_return(
-                            ResponseOutputItemDoneEvent(
-                                type="response.output_item.done",
-                                sequence_number=-1,
-                                output_index=current_output_index,
-                                item=ResponseOutputMessage(
-                                    id=current_item_id,
-                                    type="message",
-                                    role="assistant",
-                                    content=[],
-                                    status="completed",
-                                ),
+                            yield _increment_sequence_number_and_return(
+                                ResponseContentPartDoneEvent(
+                                    type="response.content_part.done",
+                                    sequence_number=-1,
+                                    item_id=current_item_id,
+                                    output_index=current_output_index,
+                                    content_index=current_content_index,
+                                    part=ResponseOutputText(
+                                        type="output_text",
+                                        text="",
+                                        annotations=[],
+                                        logprobs=[],
+                                    ),
+                                )
                             )
-                        )
-                        current_output_index += 1
-                        current_item_id = random_uuid()
-                        assert delta_message.tool_calls[0].function is not None
-                        current_tool_call_name = delta_message.tool_calls[
-                            0
-                        ].function.name
-                        current_tool_call_id = f"call_{random_uuid()}"
-                        yield _increment_sequence_number_and_return(
-                            ResponseOutputItemAddedEvent(
-                                type="response.output_item.added",
-                                sequence_number=-1,
-                                output_index=current_output_index,
-                                item=ResponseFunctionToolCallItem(
-                                    type="function_call",
-                                    id=current_item_id,
-                                    call_id=current_tool_call_id,
-                                    name=current_tool_call_name,
-                                    arguments="",
-                                    status="in_progress",
-                                ),
+                            yield _increment_sequence_number_and_return(
+                                ResponseOutputItemDoneEvent(
+                                    type="response.output_item.done",
+                                    sequence_number=-1,
+                                    output_index=current_output_index,
+                                    item=ResponseOutputMessage(
+                                        id=current_item_id,
+                                        type="message",
+                                        role="assistant",
+                                        content=[],
+                                        status="completed",
+                                    ),
+                                )
                             )
-                        )
-                        # skip content part for tool call
-                        current_content_index = 1
-                        continue
+                            current_output_index += 1
+                            current_item_id = random_uuid()
+                            assert delta_message.tool_calls[0].function is not None
+                            current_tool_call_name = delta_message.tool_calls[
+                                0
+                            ].function.name
+                            current_tool_call_id = f"call_{random_uuid()}"
+                            current_item_kind = "tool_call"
+                            yield _increment_sequence_number_and_return(
+                                ResponseOutputItemAddedEvent(
+                                    type="response.output_item.added",
+                                    sequence_number=-1,
+                                    output_index=current_output_index,
+                                    item=ResponseFunctionToolCallItem(
+                                        type="function_call",
+                                        id=current_item_id,
+                                        call_id=current_tool_call_id,
+                                        name=current_tool_call_name,
+                                        arguments="",
+                                        status="in_progress",
+                                    ),
+                                )
+                            )
+                            # skip content part for tool call
+                            current_content_index = 1
+                            continue
                 elif delta_message.reasoning_content is not None:
                     yield _increment_sequence_number_and_return(
                         ResponseReasoningTextDeltaEvent(
