@@ -23,7 +23,6 @@ from openai.types.responses import (
     ResponseCodeInterpreterToolCallParam,
     ResponseContentPartAddedEvent,
     ResponseContentPartDoneEvent,
-    ResponseOutputTextDoneEvent,
     ResponseFunctionCallArgumentsDeltaEvent,
     ResponseFunctionCallArgumentsDoneEvent,
     ResponseFunctionToolCall,
@@ -2031,22 +2030,10 @@ class OpenAIServingResponses(OpenAIServing):
             )
 
             try:
-                pending_message_added: dict[str, ResponseOutputItemAddedEvent] = {}
-                suppressed_message_ids: set[str] = set()
-
-                def _has_tool_call_markup(text: str) -> bool:
-                    return any(
-                        token in text
-                        for token in (
-                            "<tool_call>",
-                            "</tool_call>",
-                            "<function",
-                            "</function",
-                            "<parameter",
-                            "</parameter",
-                        )
-                    )
-
+                tool_parser = self.tool_parser(tokenizer)
+                tool_start_str = tool_parser.tool_call_start_token
+                tool_end_str = tool_parser.tool_call_end_token
+                
                 async for event_data in processer(
                     request,
                     sampling_params,
@@ -2061,66 +2048,17 @@ class OpenAIServingResponses(OpenAIServing):
                     if self.use_harmony:
                         pass
                     else:
-                        def _suppress_item(item_id: str) -> None:
-                            suppressed_message_ids.add(item_id)
-                            pending_message_added.pop(item_id, None)
-
-                        def _content_has_tool_call(
-                            content: list[ResponseContent]
-                        ) -> bool:
-                            return any(
-                                isinstance(part, ResponseOutputText)
-                                and _has_tool_call_markup(part.text or "")
-                                for part in content
-                            )
-
-                        if isinstance(event_data, ResponseOutputItemAddedEvent):
-                            item = event_data.item
-                            if isinstance(item, ResponseOutputMessage):
-                                if item.content:
-                                    if _content_has_tool_call(item.content):
-                                        _suppress_item(item.id)
-                                        continue
-                                else:
-                                    pending_message_added[item.id] = event_data
-                                    continue
-
-                        if isinstance(event_data, ResponseContentPartAddedEvent):
-                            if event_data.item_id in suppressed_message_ids:
-                                continue
-                            part = event_data.part
-                            if isinstance(part, ResponseOutputText) and _has_tool_call_markup(
-                                part.text or ""
-                            ):
-                                _suppress_item(event_data.item_id)
-                                continue
-                            if event_data.item_id in pending_message_added:
-                                yield pending_message_added.pop(event_data.item_id)
+                        if not hasattr(self, "_suppress_tool_text_delta"):
+                            self._suppress_tool_text_delta = False
 
                         if isinstance(event_data, ResponseTextDeltaEvent):
-                            if event_data.item_id in suppressed_message_ids:
+                            delta_text = event_data.delta or ""
+                            if tool_start_str in delta_text:
+                                self._suppress_tool_text_delta = True
+                            if self._suppress_tool_text_delta:
+                                if tool_end_str in delta_text:
+                                    self._suppress_tool_text_delta = False
                                 continue
-                            if _has_tool_call_markup(event_data.delta or ""):
-                                _suppress_item(event_data.item_id)
-                                continue
-                            if event_data.item_id in pending_message_added:
-                                yield pending_message_added.pop(event_data.item_id)
-
-                        if isinstance(
-                            event_data,
-                            (ResponseOutputTextDoneEvent, ResponseContentPartDoneEvent),
-                        ):
-                            if event_data.item_id in suppressed_message_ids:
-                                continue
-
-                        if isinstance(event_data, ResponseOutputItemDoneEvent):
-                            item = event_data.item
-                            if isinstance(item, ResponseOutputMessage):
-                                if item.id in suppressed_message_ids:
-                                    continue
-                                if item.content and _content_has_tool_call(item.content):
-                                    _suppress_item(item.id)
-                                    continue
                     yield event_data
             except GenerationError as e:
                 error_json = self._convert_generation_error_to_streaming_response(e)
