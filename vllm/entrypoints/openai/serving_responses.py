@@ -2040,7 +2040,22 @@ class OpenAIServingResponses(OpenAIServing):
                     request_metadata,
                     created_time,
                     _increment_sequence_number_and_return,
-                ):
+                ):  
+                    if self.use_harmony:
+                        pass
+                    else:
+                        skip_event = False
+                        if isinstance(event_data, ResponseOutputItemDoneEvent):
+                            item = event_data.item
+                            if isinstance(item, ResponseOutputMessage):
+                                for part in item.content:
+                                    if isinstance(part, ResponseOutputText):
+                                        text = part.text or ""
+                                        if "<tool_call>" in text and "</tool_call>" in text:
+                                            skip_event = True
+                                            break
+                        if skip_event:
+                            continue
                     yield event_data
             except GenerationError as e:
                 error_json = self._convert_generation_error_to_streaming_response(e)
