@@ -488,6 +488,24 @@ async def create_messages(request: AnthropicMessagesRequest, raw_request: Reques
 @with_cancellation
 @load_aware_call
 async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
+    #add logging for request
+    print("Chat Completion Request: ", request.model_dump())
+    raw_body = await raw_request.body()
+    try:
+        raw_body_str = raw_body.decode("utf-8")
+    except Exception:
+        raw_body_str = str(raw_body)
+    print(
+        "Chat Completion raw_request: ",
+        {
+            "method": raw_request.method,
+            "url": str(raw_request.url),
+            "headers": dict(raw_request.headers),
+            "body": raw_body_str,
+            "client": str(raw_request.client),
+        },
+    )
+    
     metrics_header_format = raw_request.headers.get(
         ENDPOINT_LOAD_METRICS_FORMAT_HEADER_LABEL, ""
     )
