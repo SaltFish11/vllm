@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 if TYPE_CHECKING:
     VLLM_HOST_IP: str = ""
     VLLM_PORT: int | None = None
+    VLLM_PORT_USE_LIST: list[int] | None = None
     VLLM_RPC_BASE_PATH: str = tempfile.gettempdir()
     VLLM_USE_MODELSCOPE: bool = False
     VLLM_RINGBUFFER_WARNING_INTERVAL: int = 60
@@ -454,6 +455,32 @@ def get_vllm_port() -> int | None:
         raise ValueError(f"VLLM_PORT '{port}' must be a valid integer") from err
 
 
+def get_vllm_port_use_list() -> list[int] | None:
+    raw_value = os.getenv("VLLM_PORT_USE_LIST")
+    if raw_value is None:
+        raw_value = os.getenv("PORT_USE_LIST")
+    if raw_value is None:
+        return None
+    ports: list[int] = []
+    for item in raw_value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            port = int(item)
+        except ValueError as err:
+            raise ValueError(
+                "VLLM_PORT_USE_LIST "
+                f"'{raw_value}' must be a comma-separated list of integers"
+            ) from err
+        if port <= 0 or port > 65535:
+            raise ValueError(
+                f"VLLM_PORT_USE_LIST '{raw_value}' contains invalid port {port}"
+            )
+        ports.append(port)
+    return ports or None
+
+
 # The start-* and end* here are used by the documentation generator
 # to extract the used env vars.
 
@@ -538,6 +565,7 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # VLLM_PORT will be used as the first port, and the rest will be generated
     # by incrementing the VLLM_PORT value.
     "VLLM_PORT": get_vllm_port,
+    "VLLM_PORT_USE_LIST": get_vllm_port_use_list,
     # path used for ipc when the frontend api server is running in
     # multi-processing mode to communicate with the backend engine process.
     "VLLM_RPC_BASE_PATH": lambda: os.getenv(
@@ -1691,6 +1719,7 @@ def compile_factors() -> dict[str, object]:
         "VLLM_RINGBUFFER_WARNING_INTERVAL",
         "VLLM_DEBUG_DUMP_PATH",
         "VLLM_PORT",
+        "VLLM_PORT_USE_LIST",
         "VLLM_CACHE_ROOT",
         "LD_LIBRARY_PATH",
         "VLLM_SERVER_DEV_MODE",

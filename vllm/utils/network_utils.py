@@ -24,6 +24,35 @@ from vllm.logger import init_logger
 logger = init_logger(__name__)
 
 
+_PORT_USE_LIST: list[int] | None = None
+_PORT_USE_LIST_INDEX = 0
+
+
+def _load_port_use_list() -> list[int] | None:
+    global _PORT_USE_LIST
+    if _PORT_USE_LIST is None:
+        ports = envs.VLLM_PORT_USE_LIST
+        _PORT_USE_LIST = list(ports) if ports else []
+    return _PORT_USE_LIST or None
+
+
+def _next_port_from_use_list() -> int | None:
+    global _PORT_USE_LIST_INDEX
+    ports = _load_port_use_list()
+    if not ports:
+        return None
+    for _ in range(len(ports)):
+        port = ports[_PORT_USE_LIST_INDEX % len(ports)]
+        _PORT_USE_LIST_INDEX += 1
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("", port))
+                return port
+        except OSError:
+            continue
+    return None
+
+
 def close_sockets(sockets: Sequence[zmq.Socket | zmq.asyncio.Socket]):
     for sock in sockets:
         if sock is not None:
@@ -156,6 +185,9 @@ def get_open_port() -> int:
     Right now we reserve 10 ports for the data parallel master
     process. Currently it uses 2 ports.
     """
+    candidate = _next_port_from_use_list()
+    if candidate is not None:
+        return candidate
     if "VLLM_DP_MASTER_PORT" in os.environ:
         dp_master_port = envs.VLLM_DP_MASTER_PORT
         reserved_port_range = range(dp_master_port, dp_master_port + 10)
@@ -167,8 +199,22 @@ def get_open_port() -> int:
 
 
 def get_open_ports_list(count: int = 5) -> list[int]:
-    """Get a list of open ports."""
     ports = set[int]()
+    use_list = _load_port_use_list()
+    if use_list:
+        attempts = 0
+        max_attempts = len(use_list) * 2
+        while len(ports) < count and attempts < max_attempts:
+            candidate = _next_port_from_use_list()
+            if candidate is None:
+                break
+            ports.add(candidate)
+            attempts += 1
+        if len(ports) < count:
+            raise RuntimeError(
+                "VLLM_PORT_USE_LIST does not have enough available ports"
+            )
+        return list(ports)
     while len(ports) < count:
         ports.add(get_open_port())
     return list(ports)
